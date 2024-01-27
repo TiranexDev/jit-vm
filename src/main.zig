@@ -8,6 +8,7 @@ pub fn UnionInit(comptime Union: type) fn (comptime std.meta.Tag(Union), anytype
         }
     }.init;
 }
+
 const Value = u64;
 const VMRegister = usize;
 const VMLocal = usize;
@@ -15,6 +16,7 @@ const VMLocal = usize;
 const LessThan = struct {
     lhs: VMRegister,
 };
+
 const JumpConditional = struct {
     true_target: *Block,
     false_target: *Block,
@@ -27,7 +29,7 @@ const Instruction = union(enum) {
     SetLocal: VMLocal,
     GetLocal: VMLocal,
     Increment: void,
-    LessThan: LessThan, // lhs
+    LessThan: LessThan,
     Jump: *Block,
     JumpConditional: JumpConditional,
     Exit: void,
@@ -227,30 +229,34 @@ pub fn main() !void {
     defer jit.deinit();
 
     var executable = try jit.compile(&program);
+    defer executable.deinit();
+
     try executable.run(&vm);
 
     try vm.dump(std.io.getStdOut().writer());
 }
 
 const Executable = struct {
-    code: []u8,
+    code: []align(std.mem.page_size) u8,
     code_size: usize,
 
     pub const JITFunction = *const fn (usize, []Value, locals: []Value) void;
 
     pub fn run(self: *@This(), vm: *VM) !void {
-        // RDI: VM&
+        // RDI: VM& (unused for now)
         // RSI: Value* registers
         // RDX: Value* locals
-        // const func: JITFunction = @ptrCast(@alignCast(self.code));
-        //  func(0, vm.registers.items.ptr, vm.locals.items.ptr);
-
+        // I could have just called @ptrCast, but this looks more badass
         asm volatile ("call *%%rcx"
             :
-            : [unholyRegion] "{rcx}" (self.code.ptr),
-              [a] "{rsi}" (vm.registers.items.ptr),
-              [b] "{rdx}" (vm.locals.items.ptr),
+            : [code] "{rcx}" (self.code.ptr),
+              [regs] "{rsi}" (vm.registers.items.ptr),
+              [locals] "{rdx}" (vm.locals.items.ptr),
         );
+    }
+
+    pub fn deinit(self: @This()) void {
+        std.os.munmap(self.code);
     }
 };
 
